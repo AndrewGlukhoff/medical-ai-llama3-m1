@@ -1,0 +1,9 @@
+[server]
+headless = true # run background (browser not starting, memory saving, remote access)
+port = 8501 # make const port
+address = "0.0.0.0"  # КРИТИЧЕСКИ ВАЖНО: открывает доступ для всей Wi-Fi сети
+
+
+[browser]
+# gatherUsageStats = false # hide public IP-address (открыть для демонстрации)
+

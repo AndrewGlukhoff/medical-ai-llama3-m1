@@ -1,0 +1,28 @@
+# logs and tmp
+data/raw/
+data/tmp/
+data/*.csv
+logs/
+*.log
+
+# датасет можно (если < 50M)
+!data/train.jsonl
+
+# тяжелые модели и адаптеры
+models/
+adapters/
+mlx-community/
+
+# legacy code
+archive/
+
+# системный хлам Jupyter, Python
+__pycache__/
+.ipynb_checkpoints/
+.virtual_documents/
+*.pyc
+
+# confidential
+*.env
+
+nohup.out

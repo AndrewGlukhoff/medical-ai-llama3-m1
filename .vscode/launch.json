@@ -1,0 +1,28 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Telegram Bot",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/bot6.py",
+            "console": "integratedTerminal",
+            "python": "${command:python.interpreterPath}", 
+            "justMyCode": true
+        },
+        {
+            "name": "Python: Streamlit",
+            "type": "python",
+            "request": "launch",
+            "module": "streamlit",
+            "args": [
+                "run",
+                "${workspaceFolder}/src/ai_web_medic.py",
+                "--server.port", "8501"
+            ],
+            "python": "${command:python.interpreterPath}",
+            "jinja": true,
+            "justMyCode": true
+        }
+    ]
+}
