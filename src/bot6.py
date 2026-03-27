@@ -79,6 +79,7 @@ async def chat_handler(message: types.Message):
             model="local-model", # возьмется любая текущая модель по адресу localhost:1234
             messages=messages_for_llm,
             temperature=0.4, #настройки мучил до слияния
+            top_p=0.5,
             presence_penalty=1.3, # аналог repetition_penalty
             frequency_penalty=0.5, # наказывает за повтор слов
             max_tokens=400 # даем выговориться

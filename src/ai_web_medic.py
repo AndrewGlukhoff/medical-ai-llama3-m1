@@ -72,9 +72,10 @@ if prompt := st.chat_input("Опишите ваши симптомы..."):
                 model="local-model", 
                 messages=messages_for_llm,
                 temperature=0.4,
+                top_p=0.5,
                 presence_penalty=1.3,
-                frequency_penalty=0.5,
-                max_tokens=400,
+                frequency_penalty=1,
+                max_tokens=150,
                 stream=True, # Магия живого чата
             )
             
