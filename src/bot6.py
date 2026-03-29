@@ -7,23 +7,17 @@ from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.client.default import DefaultBotProperties
-from openai import AsyncOpenAI
-import yaml
+from mlx_lm.sample_utils import make_sampler, make_logits_processors
+from config import format_prompt, MODEL_PATH, GEN_SETTINGS
+from mlx_lm import load, generate
 
-# system prompt
-with open("prompts.yaml", "r", encoding="utf-8") as f:
-    prompts = yaml.safe_load(f)
-
-config = prompts["medical_expert"]
-
+# config = prompts["medical_expert"]
+model, tokenizer = load(MODEL_PATH)
 
 # 1. Настройка окружения
 logging.basicConfig(level=logging.INFO)
 load_dotenv(dotenv_path="chat_bot.env")
 TOKEN = os.getenv("BOT_TOKEN")
-
-# Инициализация API клиента
-client = AsyncOpenAI(base_url="http://localhost:1234/v1", api_key="lm-studio")
 
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode='Markdown'))
 dp = Dispatcher()
@@ -64,36 +58,45 @@ async def status_handler(message: types.Message):
 async def chat_handler(message: types.Message):
     try:
         await bot.send_chat_action(chat_id=message.chat.id, action="typing")
+
+        prompt = format_prompt(message.text)
+
+        # Выносим генерацию в отдельный поток, чтобы не блокировать asyncio
+        loop = asyncio.get_event_loop()
         
-        messages_for_llm = [
-            {
-                "role": "system",
-                "content": config["system"]
-            },
-            {
-                "role": "user",
-                "content": config["user_template"].format(user_input=message.text)
-            }
-        ]
-        response = await client.chat.completions.create(
-            model="local-model", # возьмется любая текущая модель по адресу localhost:1234
-            messages=messages_for_llm,
-            temperature=0.4, #настройки мучил до слияния
-            top_p=0.5,
-            presence_penalty=1.3, # аналог repetition_penalty
-            frequency_penalty=0.5, # наказывает за повтор слов
-            max_tokens=400 # даем выговориться
-        )
-        
-        # Обрезаем лишнее (защита от мусора в конце)
-        reply = response.choices[0].message.content.split("<|eot_id|>")[0].strip()
+        def run_generation():
+            sampler = make_sampler(
+                temp=GEN_SETTINGS.get("temp"), 
+                top_p=GEN_SETTINGS.get("top_p", 1.0)
+            )
+             # punishes model for repeating the same tokens (аналог presence_penalty), в MLX нет отдельного frequency_penalty
+            logits_processors = make_logits_processors(repetition_penalty=GEN_SETTINGS.get("repetition_penalty"))
+            
+            return generate(
+                model, 
+                tokenizer, 
+                prompt=prompt, 
+                max_tokens=GEN_SETTINGS.get("max_tokens"),
+                sampler=sampler,
+                logits_processors=logits_processors,
+            )
+
+        # Запускаем и ждем результат
+        response = await loop.run_in_executor(None, run_generation)
+
+        reply = response.strip()
+        # Если модель сама не закрыла тег, обрезаем
+        if "<|eot_id|>" in reply:
+            reply = reply.split("<|eot_id|>")[0].strip()
+
         await message.answer(reply)
         
     except Exception as e:
+        logging.error(f"Ошибка генерации: {e}")
         await message.answer(f"❌ Ошибка: Проверь сервер")
 
 async def main():
-    print("🤖 Бот запущен с поддержкой watchdog. Можешь править код!")
+    print("🤖 Бот запущен (без поддержки watchdog)")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

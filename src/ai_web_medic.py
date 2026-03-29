@@ -1,39 +1,39 @@
 import streamlit as st
-from openai import OpenAI  # Synchronous for cleaner UI logic
 import psutil
-import yaml
+from mlx_lm import load, stream_generate
+from config import MODEL_PATH, GEN_SETTINGS, format_prompt
+from mlx_lm.sample_utils import make_sampler, make_logits_processors
 
-# system prompt
-with open("prompts.yaml", "r", encoding="utf-8") as f:
-    prompts = yaml.safe_load(f)
-
-config = prompts["medical_expert"]
-
-# 1. Page Config
-st.set_page_config(page_title="TinyLlama Web", page_icon="🦙")
-
-# 2. Connection to LM Studio (No heavy local models loaded in Python)
-@st.cache_resource
-def get_client():
-    # Only the API client, no local neural networks in RAM
-    return OpenAI(base_url="http://localhost:1234/v1", api_key="lm-studio")
-
-client = get_client()
-
-# 1. Настройка вкладки браузера
+# Page Config
 st.set_page_config(
     page_title="AI Медицинский Консультант", 
     page_icon="👨‍⚕️", 
     layout="wide"
 )
 
-# 2. Главный заголовок с иконкой доктора
+# Загрузка модели (кешируем, чтобы грузить первый раз)
+@st.cache_resource
+def load_medical_model():
+    # Модель загружается напрямую в память GPU M1
+    model, tokenizer = load(MODEL_PATH)
+    return model, tokenizer
+
+model, tokenizer = load_medical_model()
+
+# interface
 st.title("👨‍⚕️ AI Медицинский Консультант")
-st.subheader("Локальная модель: Llama-3 Medical (Fine-tuned)")
+st.subheader("Локальная модель: Llama-3 Medical")
 
-# 3. Добавим небольшую плашку со статусом (опционально)
-st.info("⚠️ Внимание: Модель работает в справочном режиме. Для постановки диагноза обратитесь к врачу.")
+# Плашка с системными ресурсами M1
+with st.sidebar:
+    st.header("💻 System Monitor")
+    ram = psutil.virtual_memory()
+    st.metric("RAM Used", f"{ram.used / (1024**3):.1f} GB", f"{ram.percent}%")
+    if st.button("Clear Chat History"):
+        st.session_state.messages = []
+        st.rerun()
 
+st.info("⚠️ Внимание: Модель работает в справочном режиме. Не является диагнозом.")
 
 # Initialize chat history
 if "messages" not in st.session_state:
@@ -44,11 +44,11 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-## Поле ввода (теперь на русском)
-if prompt := st.chat_input("Опишите ваши симптомы..."):
-    st.session_state.messages.append({"role": "user", "content": prompt})
+## Поле ввода
+if user_input := st.chat_input("Опишите ваши симптомы..."):
+    st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
-        st.markdown(prompt)
+        st.markdown(user_input)
 
     with st.chat_message("assistant"):
         # Создаем пустой контейнер для "живого" текста
@@ -56,41 +56,32 @@ if prompt := st.chat_input("Опишите ваши симптомы..."):
         full_response = ""
         
         try:
-            messages_for_llm = [
-                {
-                    "role": "system",
-                    "content": config["system"]
-                },
-                {
-                    "role": "user",
-                    "content": config["user_template"].format(user_input=prompt)
-                }
-            ]
-
-            # Запрос к LM Studio (указываем stream=True)
-            response = client.chat.completions.create(
-                model="local-model", 
-                messages=messages_for_llm,
-                temperature=0.4,
-                top_p=0.5,
-                presence_penalty=1.3,
-                frequency_penalty=1,
-                max_tokens=150,
-                stream=True, # Магия живого чата
+            prompt = format_prompt(user_input)
+            sampler = make_sampler(
+                temp=GEN_SETTINGS.get("temp"), 
+                top_p=GEN_SETTINGS.get("top_p", 1.0)
             )
+            logits_processors = make_logits_processors(repetition_penalty=GEN_SETTINGS.get("repetition_penalty"))
+            for response in stream_generate(
+                model, 
+                tokenizer, 
+                prompt=prompt,
+                sampler=sampler,
+                logits_processors=logits_processors,
+                max_tokens=GEN_SETTINGS.get("max_tokens")
+            ):
+                full_response += response.text
+                # Обрезаем стоп-теги, если модель их выплевывает
+                clean_text = full_response.split("<|eot_id|>")[0].strip()
+                message_placeholder.markdown(clean_text + "▌")
+
             
-            # Читаем поток токенов (букв)
-            for chunk in response:
-                if chunk.choices[0].delta.content is not None:
-                    full_response += chunk.choices[0].delta.content
-                    # Обновляем текст на экране с эффектом печати
-                    message_placeholder.markdown(full_response + "▌")
+            # Финальный текст 
+            final_text = full_response.split("<|eot_id|>")[0].strip()
+            message_placeholder.markdown(final_text)
+            st.session_state.messages.append({"role": "assistant", "content": final_text})
             
-            # Финальный текст без курсора
-            message_placeholder.markdown(full_response)
             
         except Exception as e:
             st.error(f"Ошибка связи: {e}")
-            full_response = "Не удалось связаться с моделью на M1."
 
-    st.session_state.messages.append({"role": "assistant", "content": full_response})
